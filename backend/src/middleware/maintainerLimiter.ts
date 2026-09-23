@@ -54,6 +54,41 @@ async function releaseQuietly(release: () => Promise<void>, storePath: string): 
   }
 }
 
+/**
+ * Per-maintainer rate limit on bounty creation: at most
+ * `MAINTAINER_BOUNTY_RATE_LIMIT` (default 10) requests per rolling
+ * `MAINTAINER_BOUNTY_RATE_WINDOW_MS` (default 1h) for each `body.maintainer`.
+ * Both are read **once at module load**.
+ *
+ * Passes through (calls `next()`) when `NODE_ENV === "test"` or when
+ * `body.maintainer` is not a non-empty string (body validation rejects those).
+ * Must run after `express.json()`.
+ *
+ * Over the limit it responds 429 with a `Retry-After` header (seconds until
+ * the oldest request in the window expires). An allowed request is counted
+ * **before** `next()` is called, so it counts against the limit even if the
+ * route later rejects it.
+ *
+ * Timestamps are persisted as JSON at `MAINTAINER_RATE_LIMIT_STORE_PATH`, or
+ * `maintainer_rate_limits.json` beside `BOUNTY_STORE_PATH`, or
+ * `./data/maintainer_rate_limits.json`. The file and its directory are
+ * created when missing. A file that is unparseable or not a JSON object is
+ * treated as empty and overwritten on the next write; a malformed entry for a
+ * maintainer is treated as having no prior requests.
+ *
+ * Never throws and never rejects. Dependency failures go to `next()` as a
+ * {@link MiddlewareDependencyError}:
+ *  - `maintainer_rate_limit.acquire_lock` (`file-lock`, 503 "Service busy")
+ *    when the lock cannot be taken after 5 quick retries.
+ *  - `maintainer_rate_limit.init_store` / `read_store` / `write_store`
+ *    (`json-store`, 503) when the file cannot be created, read, or written.
+ * A failed lock release is logged and ignored.
+ *
+ * Concurrency: each read-modify-write runs under a `proper-lockfile` lock on
+ * the store file, so it is safe across concurrent requests and across
+ * processes sharing the file. A lock older than 5s is treated as stale and
+ * taken over.
+ */
 export const maintainerLimiter: RequestHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   if (process.env.NODE_ENV === "test") {
     next();
@@ -98,7 +133,12 @@ export const maintainerLimiter: RequestHandler = async (req: Request, res: Respo
     const raw = fs.readFileSync(storePath, "utf8");
     let store: Record<string, RateLimitRecord> = {};
     try {
-      store = JSON.parse(raw);
+      const parsed: unknown = JSON.parse(raw);
+      // Valid JSON that is not an object (null, a number, an array) would
+      // either throw on lookup or silently drop writes, disabling the limit.
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        store = parsed as Record<string, RateLimitRecord>;
+      }
     } catch {
       // Ignore parse error and start fresh
     }
@@ -106,7 +146,12 @@ export const maintainerLimiter: RequestHandler = async (req: Request, res: Respo
     const now = Date.now();
     const windowStart = now - WINDOW_MS;
 
-    const record = store[maintainer] || { timestamps: [] };
+    const existing = store[maintainer];
+    const record: RateLimitRecord = {
+      timestamps: Array.isArray(existing?.timestamps)
+        ? existing.timestamps.filter((ts): ts is number => typeof ts === "number")
+        : [],
+    };
 
     // Clean up old timestamps
     record.timestamps = record.timestamps.filter((ts) => ts > windowStart);
