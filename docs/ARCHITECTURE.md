@@ -653,3 +653,9 @@ stellar-bounty-board/
 ├── ONBOARDING.md
 └── package.json                # Root workspace scripts
 ```
+
+---
+
+## Contributing
+
+This document describes system design only and intentionally carries no contribution steps. The canonical contribution process is [CONTRIBUTING.md](../CONTRIBUTING.md); the per-wave "How to Contribute" sections (for example [wave-4](wave-4.md)) follow the same flow: comment on an issue to claim it, fork, branch, and open a PR with `Closes #<issue>`.
