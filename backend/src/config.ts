@@ -58,6 +58,39 @@ export interface OperationalConfig {
    * Must be a finite number greater than `0`; otherwise falls back to `10`.
    */
   rateLimitMutationMax: number;
+
+  /**
+   * Test suite timeout in milliseconds. Used by Vitest to extend timeouts
+   * for concurrency or stress tests that require more time.
+   *
+   * Source: `TEST_TIMEOUT_MS`. Default: `15000` (15 seconds).
+   * Must be a finite number greater than `0`; otherwise falls back to `15000`.
+   *
+   * Note: This is read at runtime but primarily used in test configuration files.
+   * The vitest config default (15000) is also documented in vitest.config.ts.
+   */
+  testTimeoutMs: number;
+
+  /**
+   * Number of concurrent requests to fire in concurrency tests.
+   *
+   * Source: `CONCURRENCY_TEST_COUNT`. Default: `20`.
+   * Must be a finite number greater than `0`; otherwise falls back to `20`.
+   *
+   * Affects how many simultaneous operations are attempted to verify
+   * lock mechanisms and race condition handling.
+   */
+  concurrencyTestCount: number;
+
+  /**
+   * Number of requests to fire in rate-limit stress tests.
+   *
+   * Source: `RATE_LIMIT_TEST_COUNT`. Default: `200`.
+   * Must be a finite number greater than `0`; otherwise falls back to `200`.
+   *
+   * Should be greater than rateLimitReadMax to verify rate limit enforcement.
+   */
+  rateLimitTestCount: number;
 }
 
 /**
@@ -218,10 +251,34 @@ export function getOperationalConfig(): OperationalConfig {
     return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 10;
   })();
 
+  const testTimeoutMs = (() => {
+    const raw = process.env.TEST_TIMEOUT_MS;
+    if (!raw) return 15_000;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 15_000;
+  })();
+
+  const concurrencyTestCount = (() => {
+    const raw = process.env.CONCURRENCY_TEST_COUNT;
+    if (!raw) return 20;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 20;
+  })();
+
+  const rateLimitTestCount = (() => {
+    const raw = process.env.RATE_LIMIT_TEST_COUNT;
+    if (!raw) return 200;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 200;
+  })();
+
   return {
     rateLimitWindowMs,
     rateLimitReadMax,
     rateLimitMutationMax,
+    testTimeoutMs,
+    concurrencyTestCount,
+    rateLimitTestCount,
   };
 }
 
